@@ -61,8 +61,7 @@ A comprehensive stock analysis application that combines real-time market data, 
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/stock-analysis-pro.git
-cd stock-analysis-pro
+https://github.com/Brijesh1656/Stock-Analysis-Pro.git
 ```
 
 2. **Install required packages**
