@@ -13,6 +13,54 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.enums import TA_CENTER
 from datetime import datetime, timedelta
 import numpy as np
+import time
+
+
+# Cached data fetching with retry logic
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+def fetch_stock_data(ticker, start_date, end_date, max_retries=3):
+    """Fetch stock data with retry logic and rate limit handling"""
+    for attempt in range(max_retries):
+        try:
+            # Add delay between attempts
+            if attempt > 0:
+                time.sleep(2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
+            
+            df = yf.download(
+                ticker, 
+                start=start_date, 
+                end=end_date, 
+                progress=False,
+                auto_adjust=True  # Fix the FutureWarning
+            )
+            
+            # Flatten MultiIndex columns
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = ['_'.join([str(i) for i in col]).strip().rstrip('_') for col in df.columns.values]
+            
+            return df, None  # Success
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Rate" in error_msg or "429" in error_msg:
+                if attempt < max_retries - 1:
+                    continue  # Retry
+                else:
+                    return None, "⚠️ Yahoo Finance rate limit reached. Please try again in a few minutes."
+            else:
+                return None, f"❌ Error: {error_msg}"
+    
+    return None, "❌ Failed to fetch data after multiple attempts."
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_ticker_info(ticker):
+    """Fetch ticker info with error handling"""
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.info
+    except:
+        return {}
 
 
 def calculate_technical_indicators(df, close_col):
@@ -23,7 +71,6 @@ def calculate_technical_indicators(df, close_col):
     delta = df_copy[close_col].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    # Handle division by zero for rs calculation
     rs = gain / loss.replace(0, np.nan) 
     df_copy['RSI'] = 100 - (100 / (1 + rs))
     
@@ -273,27 +320,22 @@ with st.sidebar:
     
     if fetch_btn:
         with st.spinner(f"Fetching data for {ticker}..."):
-            try:
-                # Fetch stock data
-                df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+            # Fetch stock data with retry logic
+            df, error = fetch_stock_data(ticker, start_date, end_date)
+            
+            if error:
+                st.error(error)
+                if "rate limit" in error.lower():
+                    st.info("💡 **Tip**: Try again in 1-2 minutes or use a different ticker.")
+            elif df.empty:
+                st.error("❌ No data found for this ticker and date range.")
+            else:
+                # Fetch ticker info
+                ticker_info = fetch_ticker_info(ticker)
                 
-                # Flatten MultiIndex columns
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = ['_'.join([str(i) for i in col]).strip().rstrip('_') for col in df.columns.values]
-                
-                # Get ticker info
-                stock = yf.Ticker(ticker)
-                ticker_info = stock.info
-                
-                if df.empty:
-                    st.error("❌ No data found for this ticker and date range.")
-                else:
-                    st.session_state['stock_data'] = df
-                    st.session_state['ticker_info'] = ticker_info
-                    st.success(f"✅ Loaded {len(df)} days of data!")
-                    
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.session_state['stock_data'] = df
+                st.session_state['ticker_info'] = ticker_info
+                st.success(f"✅ Loaded {len(df)} days of data!")
     
     # Show data info if available
     if st.session_state['stock_data'] is not None:
@@ -316,7 +358,7 @@ if st.session_state['stock_data'] is not None:
     volume_col = 'Volume' if 'Volume' in data.columns else f'Volume_{ticker}'
     
     
-    if len(data) >= 50: # Check for minimum data for indicators like SMA(50)
+    if len(data) >= 50:
         data = calculate_technical_indicators(data, close_col).dropna()
         if data.empty:
             st.warning("Not enough clean data after calculating technical indicators. Charts may be incomplete.")
@@ -324,7 +366,6 @@ if st.session_state['stock_data'] is not None:
     # Key Metrics Row
     st.markdown("### 📊 Key Metrics")
     
-    # Ensure data is not empty after indicator calculation and dropna
     if data.empty:
         st.warning("Data is empty. Please check your selected date range or ticker.")
         st.stop()
@@ -414,7 +455,6 @@ if st.session_state['stock_data'] is not None:
     with tab1:
         st.markdown("### Interactive Price Chart")
         
-        # Chart type selector
         chart_col1, chart_col2 = st.columns([3, 1])
         
         with chart_col1:
@@ -427,7 +467,6 @@ if st.session_state['stock_data'] is not None:
         with chart_col2:
             show_volume = st.checkbox("Show Volume", value=True)
         
-        # Technical indicators selector
         st.markdown("#### Overlay Indicators")
         indicators = st.multiselect(
             "Select indicators to overlay",
@@ -435,7 +474,6 @@ if st.session_state['stock_data'] is not None:
             default=["SMA (20)", "SMA (50)"]
         )
         
-        # Create subplot
         if show_volume:
             fig = make_subplots(
                 rows=2, cols=1,
@@ -535,7 +573,6 @@ if st.session_state['stock_data'] is not None:
                 color_idx += 1
             
             elif indicator == "Bollinger Bands":
-                # Use pre-calculated BB if available, otherwise calculate temporary ones
                 if 'BB_Upper' in data.columns:
                     bb_upper = data['BB_Upper']
                     bb_lower = data['BB_Lower']
@@ -582,7 +619,6 @@ if st.session_state['stock_data'] is not None:
                 )
                 color_idx += 1
         
-        # Add volume
         if show_volume:
             colors_volume = ['#ef4444' if data[close_col].iloc[i] < data[open_col].iloc[i] else '#10b981' 
                            for i in range(len(data))]
@@ -597,7 +633,6 @@ if st.session_state['stock_data'] is not None:
                 row=2, col=1
             )
         
-        # Update layout
         fig.update_layout(
             height=700,
             template='plotly_dark',
@@ -624,84 +659,27 @@ if st.session_state['stock_data'] is not None:
     # TAB 2: AI Analysis
     with tab2:
         st.markdown("### 🤖 AI-Powered Technical Analysis")
-        st.markdown("Get intelligent insights powered by Llama Vision AI")
+        
+        # Check if Ollama is likely available (local only)
+        st.info("⚠️ **Note**: AI Analysis requires Ollama running locally. This feature is disabled on Streamlit Cloud.")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
             if st.button("🚀 Generate AI Analysis", use_container_width=True):
-                with st.spinner("🔍 Analyzing chart patterns and trends..."):
-                    try:
-                        # Create a clean chart for AI analysis
-                        analysis_fig = go.Figure(data=[
-                            go.Candlestick(
-                                x=data.index,
-                                open=data[open_col],
-                                high=data[high_col],
-                                low=data[low_col],
-                                close=data[close_col],
-                                name="Price"
-                            )
-                        ])
-                        
-                        # Add key indicators
-                        sma20 = data[close_col].rolling(window=20).mean()
-                        sma50 = data[close_col].rolling(window=50).mean()
-                        
-                        analysis_fig.add_trace(go.Scatter(x=data.index, y=sma20, mode='lines', name='SMA 20'))
-                        analysis_fig.add_trace(go.Scatter(x=data.index, y=sma50, mode='lines', name='SMA 50'))
-                        
-                        analysis_fig.update_layout(
-                            title=f"{ticker} Technical Chart",
-                            template='plotly_dark',
-                            height=600,
-                            xaxis_rangeslider_visible=False
-                        )
-                        
-                        # Save chart as image
-                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
-                            analysis_fig.write_image(tmpfile.name, width=1200, height=600)
-                            tmpfile_path = tmpfile.name
-                        
-                        # Read and encode image
-                        with open(tmpfile_path, "rb") as image_file:
-                            image_data = base64.b64encode(image_file.read()).decode('utf-8')
-                        
-                        # Prepare AI prompt
-                        messages = [{
-                            'role': 'user',
-                            'content': f"""You are an expert stock trader and technical analyst with 20+ years of experience.
-
-Analyze this {ticker} stock chart and provide:
-
-1. **Current Trend Analysis**: Identify the primary trend (bullish/bearish/sideways) and key support/resistance levels
-2. **Technical Patterns**: Note any chart patterns (head & shoulders, triangles, flags, etc.)
-3. **Indicator Signals**: Analyze SMA crossovers and momentum
-4. **Volume Analysis**: Comment on volume trends and what they indicate
-5. **Recommendation**: Provide a clear BUY/HOLD/SELL recommendation with specific entry/exit points
-6. **Risk Assessment**: Identify key risk factors and stop-loss levels
-
-Be specific with price levels and provide actionable insights. Format your response clearly with sections.""",
-                            'images': [image_data]
-                        }]
-                        
-                        # Call Ollama
-                        response = ollama.chat(model='llama3.2-vision', messages=messages)
-                        analysis = response["message"]["content"]
-                        
-                        st.session_state['ai_analysis'] = analysis
-                        os.remove(tmpfile_path)
-                        
-                    except Exception as e:
-                        analysis = f"⚠️ **Error connecting to Ollama AI:**\n\n{str(e)}\n\n**Troubleshooting:**\n- Ensure Ollama is installed and running\n- Run `ollama serve` in terminal\n- Pull the model: `ollama pull llama3.2-vision`"
-                        st.session_state['ai_analysis'] = analysis
+                st.warning("🔌 AI Analysis is only available when running locally with Ollama installed.")
+                st.markdown("""
+                **To use AI Analysis:**
+                1. Install Ollama: https://ollama.ai
+                2. Run: `ollama pull llama3.2-vision`
+                3. Run: `ollama serve`
+                4. Run this app locally: `streamlit run app.py`
+                """)
         
         with col2:
-            st.info("💡 **Tip**: The AI analyzes chart patterns, trends, and technical indicators to provide actionable insights.")
+            st.info("💡 **Tip**: Download and run locally for AI-powered insights!")
         
-        # Display analysis
         if st.session_state.get('ai_analysis'):
-            # This section was moved to Tab 3, but the placeholder for the AI analysis text display is below:
             st.markdown("#### 💬 AI Analysis Report")
             st.markdown(st.session_state['ai_analysis'])
 
@@ -710,14 +688,11 @@ Be specific with price levels and provide actionable insights. Format your respo
     with tab3:
         st.markdown("### 📊 Technical Indicators Overview")
         
-        # Check if indicators columns exist in the DataFrame
         if 'RSI' in data.columns and 'MACD' in data.columns and 'BB_Upper' in data.columns:
             
-            # Define columns for indicator cards
             ind_col1, ind_col2, ind_col3 = st.columns(3)
 
             with ind_col1:
-                # FIX: Used 'data' instead of 'data_copy'
                 current_rsi = data['RSI'].iloc[-1]
                 rsi_signal = "Oversold 🟢" if current_rsi < 30 else "Overbought 🔴" if current_rsi > 70 else "Neutral 🟡"
                 rsi_color = "#10b981" if current_rsi < 30 else "#ef4444" if current_rsi > 70 else "#f59e0b"
@@ -732,7 +707,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                 """, unsafe_allow_html=True)
 
             with ind_col2:
-                # FIX: Used 'data' instead of 'data_copy'
                 current_macd = data['MACD'].iloc[-1]
                 current_signal = data['MACD_Signal'].iloc[-1]
                 macd_trend = "Bullish 🟢" if current_macd > current_signal else "Bearish 🔴"
@@ -748,7 +722,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                 """, unsafe_allow_html=True)
 
             with ind_col3:
-                # FIX: Used 'data' instead of 'data_copy'
                 current_price_val = data[close_col].iloc[-1]
                 bb_upper_val = data['BB_Upper'].iloc[-1]
                 bb_lower_val = data['BB_Lower'].iloc[-1]
@@ -771,7 +744,6 @@ Be specific with price levels and provide actionable insights. Format your respo
             st.markdown("#### RSI (Relative Strength Index)")
             rsi_fig = go.Figure()
             rsi_fig.add_trace(go.Scatter(
-                # FIX: Used 'data' instead of 'data_copy'
                 x=data.index,
                 y=data['RSI'],
                 mode='lines',
@@ -801,7 +773,6 @@ Be specific with price levels and provide actionable insights. Format your respo
             st.markdown("#### MACD (Moving Average Convergence Divergence)")
             macd_fig = go.Figure()
             macd_fig.add_trace(go.Scatter(
-                # FIX: Used 'data' instead of 'data_copy'
                 x=data.index,
                 y=data['MACD'],
                 mode='lines',
@@ -809,7 +780,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                 line=dict(color='#667eea', width=2)
             ))
             macd_fig.add_trace(go.Scatter(
-                # FIX: Used 'data' instead of 'data_copy'
                 x=data.index,
                 y=data['MACD_Signal'],
                 mode='lines',
@@ -817,11 +787,8 @@ Be specific with price levels and provide actionable insights. Format your respo
                 line=dict(color='#f59e0b', width=2)
             ))
             
-            # Histogram colors
-            # FIX: Used 'data' instead of 'data_copy'
             colors_hist = ['#10b981' if val >= 0 else '#ef4444' for val in data['MACD_Hist']]
             macd_fig.add_trace(go.Bar(
-                # FIX: Used 'data' instead of 'data_copy'
                 x=data.index,
                 y=data['MACD_Hist'],
                 name='Histogram',
@@ -862,7 +829,6 @@ Be specific with price levels and provide actionable insights. Format your respo
         
         if st.button("🚀 Run Backtest", use_container_width=True):
             with st.spinner("Running backtest simulation..."):
-                # FIX: Use existing 'data' with indicators if possible, or start with a copy.
                 bt_data = data.copy()
                 
                 if strategy_type == "SMA Crossover (20/50)":
@@ -878,7 +844,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                     bt_data.loc[bt_data['SMA_Fast'] > bt_data['SMA_Slow'], 'Signal'] = 1
                     
                 elif strategy_type == "RSI Mean Reversion":
-                    # FIX: Use existing RSI column if available, else recalculate
                     if 'RSI' not in bt_data.columns:
                         delta = bt_data[close_col].diff()
                         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -887,11 +852,10 @@ Be specific with price levels and provide actionable insights. Format your respo
                         bt_data['RSI'] = 100 - (100 / (1 + rs))
                     
                     bt_data['Signal'] = 0
-                    bt_data.loc[bt_data['RSI'] < 30, 'Signal'] = 1  # Buy oversold
-                    bt_data.loc[bt_data['RSI'] > 70, 'Signal'] = -1  # Sell overbought
+                    bt_data.loc[bt_data['RSI'] < 30, 'Signal'] = 1
+                    bt_data.loc[bt_data['RSI'] > 70, 'Signal'] = -1
                     
                 elif strategy_type == "MACD Crossover":
-                    # FIX: Use existing MACD columns if available, else recalculate
                     if 'MACD' not in bt_data.columns:
                         exp1 = bt_data[close_col].ewm(span=12, adjust=False).mean()
                         exp2 = bt_data[close_col].ewm(span=26, adjust=False).mean()
@@ -901,38 +865,32 @@ Be specific with price levels and provide actionable insights. Format your respo
                     bt_data['Signal'] = 0
                     bt_data.loc[bt_data['MACD'] > bt_data['MACD_Signal'], 'Signal'] = 1
                 
-                # Calculate returns
                 bt_data['Returns'] = bt_data[close_col].pct_change()
                 bt_data['Strategy_Returns'] = bt_data['Signal'].shift(1) * bt_data['Returns']
                 
-                # Calculate cumulative returns
                 bt_data['Cumulative_Market'] = (1 + bt_data['Returns']).cumprod()
                 bt_data['Cumulative_Strategy'] = (1 + bt_data['Strategy_Returns']).cumprod()
                 
                 bt_data = bt_data.dropna()
                 
                 if not bt_data.empty:
-                    # Performance metrics
                     total_return_market = (bt_data['Cumulative_Market'].iloc[-1] - 1) * 100
                     total_return_strategy = (bt_data['Cumulative_Strategy'].iloc[-1] - 1) * 100
                     
                     final_capital_market = initial_capital * bt_data['Cumulative_Market'].iloc[-1]
                     final_capital_strategy = initial_capital * bt_data['Cumulative_Strategy'].iloc[-1]
                     
-                    # Sharpe Ratio (annualized)
                     sharpe_market = (bt_data['Returns'].mean() / bt_data['Returns'].std()) * np.sqrt(252) if bt_data['Returns'].std() != 0 else 0
                     sharpe_strategy = (bt_data['Strategy_Returns'].mean() / bt_data['Strategy_Returns'].std()) * np.sqrt(252) if bt_data['Strategy_Returns'].std() != 0 else 0
                     
-                    # Max Drawdown
                     cumulative_market = bt_data['Cumulative_Market']
                     running_max_market = cumulative_market.expanding().max()
-                    drawdown_market = ((cumulative_market - running_max_market) / running_max_market).min() * 100 # FIX: corrected running_maximum_market to running_max_market
+                    drawdown_market = ((cumulative_market - running_max_market) / running_max_market).min() * 100
                     
                     cumulative_strategy = bt_data['Cumulative_Strategy']
                     running_max_strategy = cumulative_strategy.expanding().max()
                     drawdown_strategy = ((cumulative_strategy - running_max_strategy) / running_max_strategy).min() * 100
                     
-                    # Display results
                     st.markdown("#### 📊 Backtest Results")
                     
                     result_col1, result_col2, result_col3, result_col4 = st.columns(4)
@@ -983,7 +941,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # Equity curve chart
                     equity_fig = go.Figure()
                     
                     equity_fig.add_trace(go.Scatter(
@@ -1021,7 +978,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                     
                     st.plotly_chart(equity_fig, use_container_width=True)
                     
-                    # Trade signals on price chart
                     st.markdown("#### 📍 Trade Signals on Price Chart")
                     
                     signals_fig = go.Figure()
@@ -1033,7 +989,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                         line=dict(color='#667eea', width=2)
                     ))
                     
-                    # Buy signals
                     buy_signals = bt_data[bt_data['Signal'].diff() == 1]
                     signals_fig.add_trace(go.Scatter(
                         x=buy_signals.index,
@@ -1043,7 +998,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                         marker=dict(color='#10b981', size=12, symbol='triangle-up')
                     ))
                     
-                    # Sell signals
                     sell_signals = bt_data[bt_data['Signal'].diff() == -1]
                     signals_fig.add_trace(go.Scatter(
                         x=sell_signals.index,
@@ -1084,7 +1038,6 @@ Be specific with price levels and provide actionable insights. Format your respo
                     doc = SimpleDocTemplate("stock_analysis_report.pdf", pagesize=letter)
                     styles = getSampleStyleSheet()
                     
-                    # Custom styles
                     title_style = ParagraphStyle(
                         'CustomTitle',
                         parent=styles['Heading1'],
@@ -1145,7 +1098,6 @@ Be specific with price levels and provide actionable insights. Format your respo
         st.info("💡 Generate AI analysis to unlock PDF reports!")
 
 else:
-    # Welcome screen when no data is loaded
     st.markdown("""
     <div style="text-align: center; padding: 4rem 2rem;">
         <h2 style="color: #667eea; margin-bottom: 1rem;">👋 Welcome to Stock Analysis Pro</h2>
@@ -1156,23 +1108,22 @@ else:
             <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">📈</div>
                 <h3 style="color: #667eea;">Advanced Charts</h3>
-                <p style="color: rgba(255,255,255,0.6);">Interactive candlestick charts with multiple technical indicators</p>
+                <p style="color: rgba(255,255,255,0.6)">Interactive candlestick charts with multiple technical indicators</p>
             </div>
             <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">🤖</div>
                 <h3 style="color: #667eea;">AI Analysis</h3>
-                <p style="color: rgba(255,255,255,0.6);">Get intelligent insights powered by Llama Vision AI</p>
+                <p style="color: rgba(255,255,255,0.6)">Get intelligent insights powered by Llama Vision AI</p>
             </div>
             <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
                 <h3 style="color: #667eea;">Backtesting</h3>
-                <p style="color: rgba(255,255,255,0.6);">Test trading strategies with historical data</p>
+                <p style="color: rgba(255,255,255,0.6)">Test trading strategies with historical data</p>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: rgba(255,255,255,0.5); padding: 2rem;">
