@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import ollama
 import tempfile
 import base64
 import os
@@ -13,7 +14,7 @@ from reportlab.lib.enums import TA_CENTER
 from datetime import datetime, timedelta
 import numpy as np
 import time
-import google.generativeai as genai # <-- ADDED THIS IMPORT
+
 
 # Cached data fetching with retry logic
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
@@ -655,67 +656,33 @@ if st.session_state['stock_data'] is not None:
         
         st.plotly_chart(fig, use_container_width=True)
     
-    # ------------------- START OF REPLACEMENT -------------------
     # TAB 2: AI Analysis
     with tab2:
         st.markdown("### 🤖 AI-Powered Technical Analysis")
-
-        # Configure the Gemini API key from Streamlit secrets
-        try:
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash') # Use the fast and capable Flash model
-            api_configured = True
-        except Exception:
-            api_configured = False
-            st.error("❌ Gemini API Key not configured. Please add it to your Streamlit Secrets.")
-
-        if st.button("🚀 Generate AI Analysis", use_container_width=True, disabled=not api_configured):
-            with st.spinner("🤖 The AI is analyzing the charts... this may take a moment."):
-                try:
-                    # Prepare the data summary for the AI prompt
-                    analysis_data = data.tail(90) # Use last 90 days for context
-                    data_summary = analysis_data[[close_col, high_col, low_col, volume_col, 'RSI', 'MACD']].to_string()
-                    
-                    # Create a detailed prompt for the AI
-                    prompt = f"""
-                    You are a professional financial analyst. Analyze the following stock data for the ticker: {ticker}.
-
-                    **Key Metrics:**
-                    - Current Price: ${current_price:.2f}
-                    - 52-Week High: ${high_52w:.2f}
-                    - 52-Week Low: ${low_52w:.2f}
-                    - Current RSI (14): {data['RSI'].iloc[-1]:.2f}
-                    - Current MACD: {data['MACD'].iloc[-1]:.2f} (Signal: {data['MACD_Signal'].iloc[-1]:.2f})
-
-                    **Recent Data (last 90 days):**
-                    ```
-                    {data_summary}
-                    ```
-
-                    **Instructions:**
-                    Based on all the provided information, provide a concise technical analysis. Structure your response with the following markdown sections:
-                    1.  **## 📈 Overall Trend Analysis**: Describe the primary trend (bullish, bearish, sideways) observed in the recent data.
-                    2.  **## 🟢 Bullish Signals**: List 2-3 potential bullish indicators or patterns you see (e.g., RSI oversold, bullish MACD crossover, price above a key moving average).
-                    3.  **## 🔴 Bearish Signals**: List 2-3 potential bearish indicators or patterns (e.g., RSI overbought, bearish divergence, price hitting resistance).
-                    4.  **## ✒️ Summary**: Provide a concluding summary of the stock's current technical posture.
-
-                    Keep the analysis professional, data-driven, and neutral. Do not provide financial advice.
-                    """
-                    
-                    # Call the Gemini API
-                    response = model.generate_content(prompt)
-                    
-                    # Store and display the result
-                    st.session_state['ai_analysis'] = response.text
-                    
-                except Exception as e:
-                    st.error(f"An error occurred while generating the analysis: {str(e)}")
-
+        
+        # Check if Ollama is likely available (local only)
+        st.info("⚠️ **Note**: AI Analysis requires Ollama running locally. This feature is disabled on Streamlit Cloud.")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            if st.button("🚀 Generate AI Analysis", use_container_width=True):
+                st.warning("🔌 AI Analysis is only available when running locally with Ollama installed.")
+                st.markdown("""
+                **To use AI Analysis:**
+                1. Install Ollama: https://ollama.ai
+                2. Run: `ollama pull llama3.2-vision`
+                3. Run: `ollama serve`
+                4. Run this app locally: `streamlit run app.py`
+                """)
+        
+        with col2:
+            st.info("💡 **Tip**: Download and run locally for AI-powered insights!")
+        
         if st.session_state.get('ai_analysis'):
-            st.markdown("---")
             st.markdown("#### 💬 AI Analysis Report")
-            st.markdown(st.session_state['ai_analysis'], unsafe_allow_html=True)
-    # -------------------- END OF REPLACEMENT --------------------
+            st.markdown(st.session_state['ai_analysis'])
+
     
     # TAB 3: Technical Indicators
     with tab3:
@@ -1102,17 +1069,15 @@ if st.session_state['stock_data'] is not None:
                     doc.build(content)
                     
                     with open("stock_analysis_report.pdf", "rb") as pdf_file:
-                        pdf_bytes = pdf_file.read()
-
-                    st.download_button(
-                        label="📥 Click to Download PDF",
-                        data=pdf_bytes,
-                        file_name=f"{ticker}_analysis_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                        st.download_button(
+                            "📥 Download PDF",
+                            pdf_file,
+                            file_name=f"{ticker}_analysis_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
                     
-                    os.remove("stock_analysis_report.pdf") # Clean up the temp file
+                    os.remove("stock_analysis_report.pdf")
                 except Exception as e:
                     st.error(f"Error generating PDF: {str(e)}")
             else:
@@ -1120,10 +1085,10 @@ if st.session_state['stock_data'] is not None:
     
     with export_col2:
         if st.button("📈 Download Data (CSV)", use_container_width=True):
-            csv = data.to_csv().encode('utf-8')
+            csv = data.to_csv()
             st.download_button(
-                label="📥 Click to Download CSV",
-                data=csv,
+                "📥 Download CSV",
+                csv,
                 file_name=f"{ticker}_data_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
                 use_container_width=True
@@ -1148,7 +1113,7 @@ else:
             <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">🤖</div>
                 <h3 style="color: #667eea;">AI Analysis</h3>
-                <p style="color: rgba(255,255,255,0.6)">Get intelligent insights powered by Google Gemini</p>
+                <p style="color: rgba(255,255,255,0.6)">Get intelligent insights powered by Llama Vision AI</p>
             </div>
             <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
@@ -1162,7 +1127,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: rgba(255,255,255,0.5); padding: 2rem;">
-    <p>Built with ❤️ using Streamlit • Powered by yFinance & Google Gemini</p>
+    <p>Built with ❤️ using Streamlit • Powered by yFinance & Ollama AI</p>
     <p style="font-size: 0.9rem; margin-top: 0.5rem;">⚠️ For educational purposes only. Not financial advice.</p>
 </div>
 """, unsafe_allow_html=True)
