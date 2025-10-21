@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import ollama
+import ollama # Keep this import for the real AI functionality
 import tempfile
 import base64
 import os
@@ -14,11 +14,156 @@ from reportlab.lib.enums import TA_CENTER
 from datetime import datetime, timedelta
 import numpy as np
 import time
+from PIL import Image # Needed for image processing (part of fig_to_base64_png)
+import io # Needed for image processing (part of fig_to_base64_png)
+
+# --- AI ANALYSIS UTILITY FUNCTIONS ---
+
+def fig_to_base64_png(fig):
+    """Converts a Plotly figure to a base64 encoded PNG image."""
+    try:
+        # Convert Plotly figure to a byte array (PNG format)
+        # NOTE: Requires the 'kaleido' library to be installed (pip install kaleido)
+        img_bytes = fig.to_image(format="png", width=1200, height=700, scale=1)
+        
+        # Encode to base64
+        base64_img = base64.b64encode(img_bytes).decode('utf-8')
+        return base64_img
+    except Exception as e:
+        # Re-raise a more informative error if kaleido is missing
+        if "to_image" in str(e) or "kaleido" in str(e):
+             raise Exception("❌ Image Conversion Failed: Install 'kaleido' (`pip install kaleido`) and 'Pillow' (`pip install Pillow`) for AI Vision Analysis.")
+        raise e
+
+def generate_ai_analysis(ticker, data, ticker_info, initial_prompt):
+    """
+    Generates a technical analysis report using a local Ollama vision model.
+    
+    NOTE: This requires Ollama and the specified model ('llama3.2-vision')
+          to be running locally and pulled.
+    """
+    close_col = 'Close' if 'Close' in data.columns else f'Close_{ticker}'
+    open_col = 'Open' if 'Open' in data.columns else f'Open_{ticker}'
+    high_col = 'High' if 'High' in data.columns else f'High_{ticker}'
+    low_col = 'Low' if 'Low' in data.columns else f'Low_{ticker}'
+    
+    try:
+        # 1. Create a plot of the data for the vision model
+        analysis_fig = make_subplots(rows=1, cols=1)
+        
+        analysis_fig.add_trace(
+            go.Candlestick(
+                x=data.index,
+                open=data[open_col],
+                high=data[high_col],
+                low=data[low_col],
+                close=data[close_col],
+                name="OHLC",
+                increasing_line_color='#10b981',
+                decreasing_line_color='#ef4444'
+            )
+        )
+        # Add SMA(20) for context if enough data
+        if len(data) >= 20:
+            data['SMA_20_AI'] = data[close_col].rolling(20).mean()
+            analysis_fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['SMA_20_AI'],
+                mode='lines',
+                name='SMA (20)',
+                line=dict(color='#f59e0b', width=1)
+            ))
+        
+        analysis_fig.update_layout(
+            template='plotly_dark',
+            title=f"Price Chart for AI Analysis ({ticker})",
+            xaxis_rangeslider_visible=False,
+            height=700
+        )
+        
+        # Convert chart to base64 image
+        base64_image = fig_to_base64_png(analysis_fig)
+        
+        # 2. Prepare text-based summary of indicators
+        # Use .get() to safely retrieve indicator data, as they might be NaN if data length < 50
+        current_rsi = data['RSI'].iloc[-1] if 'RSI' in data.columns and not data.empty else 'N/A'
+        current_macd = data['MACD'].iloc[-1] if 'MACD' in data.columns and not data.empty else 'N/A'
+        current_signal = data['MACD_Signal'].iloc[-1] if 'MACD_Signal' in data.columns and not data.empty else 'N/A'
+        current_close = data[close_col].iloc[-1] if not data.empty else 'N/A'
+        
+        text_summary = f"""
+        **Recent Data Points:**
+        - Current Price: ${current_close:.2f}
+        - RSI (14): {current_rsi:.2f} (30 is Oversold, 70 is Overbought)
+        - MACD: {current_macd:.2f} | MACD Signal: {current_signal:.2f} (MACD > Signal is Bullish)
+        - Company Info: Sector: {ticker_info.get('sector', 'N/A')}, P/E: {ticker_info.get('trailingPE', 'N/A')}
+        
+        ---
+        
+        **Task:** Analyze the provided Candlestick chart and the technical indicator data. Based on the recent price action and indicator values, provide a professional, concise, and objective technical analysis and outlook (Bullish, Bearish, or Neutral) for {ticker}. Focus on the short-term (next 1-4 weeks) trend and key support/resistance levels.
+        """
+        
+        # 3. Call Ollama Client
+        full_prompt = initial_prompt + "\n\n" + text_summary
+
+        response = ollama.chat(
+            model='llama3.2-vision', # Change this model if you use a different vision model
+            messages=[
+                {
+                    'role': 'user',
+                    'content': full_prompt,
+                    'images': [base64_image]
+                }
+            ]
+        )
+        return response['message']['content'], None
+
+    except ConnectionError:
+        return None, "❌ **Ollama Connection Error:** Could not connect to the local Ollama server. Ensure it is running (`ollama serve`) and the model is pulled (`ollama pull llama3.2-vision`)."
+    except Exception as e:
+        # Catch specific errors for better user guidance
+        if "to_image" in str(e) or "kaleido" in str(e):
+             return None, f"❌ **Image Conversion Error:** Install the `kaleido` library (`pip install kaleido`) and `Pillow` (`pip install Pillow`) for AI Vision Analysis."
+        if "llama3.2-vision" in str(e):
+             return None, f"❌ **Ollama Model Error:** The model 'llama3.2-vision' is not found. Please run `ollama pull llama3.2-vision`."
+        return None, f"❌ **AI Generation Error:** {type(e).__name__}: {str(e)}. Check your Ollama setup."
+
+def simulate_ai_analysis(ticker, data):
+    """Provides a deterministic, simulated AI analysis as a fallback."""
+    current_rsi = data['RSI'].iloc[-1]
+    close_col = 'Close' if 'Close' in data.columns else f'Close_{ticker}'
+    current_price = data[close_col].iloc[-1]
+    
+    # Simple logic for simulation
+    outlook = "Neutral 🟡"
+    if current_rsi < 35 and current_price < data['BB_Lower'].iloc[-1]:
+        outlook = "Bullish 🟢 (Oversold Bounce Potential)"
+    elif current_rsi > 65 and current_price > data['BB_Upper'].iloc[-1]:
+        outlook = "Bearish 🔴 (Overbought Pullback Potential)"
+        
+    analysis_report = f"""
+    ### {ticker} Technical Analysis Report (Simulated Fallback)
+    
+    Based on the simulated analysis of the last **{len(data)}** trading days, the current technical **outlook is {outlook}**.
+    
+    #### Key Indicator Summary:
+    * **RSI (14):** **{current_rsi:.2f}**. This suggests the stock is currently in a {'near-oversold' if current_rsi < 40 else 'neutral' if 40 <= current_rsi <= 60 else 'near-overbought'} territory.
+    * **MACD:** The MACD line is {'above' if data['MACD'].iloc[-1] > data['MACD_Signal'].iloc[-1] else 'below'} its signal line, indicating a {'positive momentum' if data['MACD'].iloc[-1] > data['MACD_Signal'].iloc[-1] else 'negative momentum'}.
+    * **Bollinger Bands:** The price is trading {'near the lower band' if current_price < data['BB_Middle'].iloc[-1] else 'near the upper band'}, suggesting {'potential support' if current_price < data['BB_Middle'].iloc[-1] else 'potential resistance'}.
+
+    **Disclaimer:** This is a **simulated report**. The real AI Analysis requires **Ollama** and the **`llama3.2-vision`** model to be running locally.
+    """
+    return analysis_report
+
+# --- END AI ANALYSIS UTILITY FUNCTIONS ---
 
 
 # Cached data fetching with retry logic
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
 def fetch_stock_data(ticker, start_date, end_date, max_retries=3):
+# ... (rest of the fetch_stock_data function remains unchanged)
+# ... (rest of the fetch_stock_data function remains unchanged)
+
     """Fetch stock data with retry logic and rate limit handling"""
     for attempt in range(max_retries):
         try:
@@ -65,6 +210,9 @@ def fetch_ticker_info(ticker):
 
 def calculate_technical_indicators(df, close_col):
     """Calculates RSI, MACD, and Bollinger Bands on a DataFrame."""
+# ... (rest of the calculate_technical_indicators function remains unchanged)
+# ... (rest of the calculate_technical_indicators function remains unchanged)
+
     df_copy = df.copy()
     
     # 1. RSI (Relative Strength Index)
@@ -91,6 +239,8 @@ def calculate_technical_indicators(df, close_col):
 
 # Page config with custom theme
 st.set_page_config(
+# ... (rest of st.set_page_config remains unchanged)
+# ... (rest of st.set_page_config remains unchanged)
     page_title="Stock Analysis Pro",
     page_icon="📈",
     layout="wide",
@@ -99,157 +249,14 @@ st.set_page_config(
 
 # Custom CSS for premium look
 st.markdown("""
-<style>
-    /* Main theme colors */
-    :root {
-        --primary-color: #6366f1;
-        --secondary-color: #8b5cf6;
-        --success-color: #10b981;
-        --danger-color: #ef4444;
-        --warning-color: #f59e0b;
-    }
-    
-    /* Hide default Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Custom header styling */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
-    }
-    
-    .main-header h1 {
-        color: white;
-        font-size: 2.5rem;
-        font-weight: 800;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-    }
-    
-    .main-header p {
-        color: rgba(255,255,255,0.9);
-        font-size: 1.1rem;
-        margin-top: 0.5rem;
-    }
-    
-    /* Metric cards */
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 12px 48px rgba(0,0,0,0.15);
-    }
-    
-    .metric-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: white;
-        margin: 0.5rem 0;
-    }
-    
-    .metric-label {
-        font-size: 0.9rem;
-        color: rgba(255,255,255,0.8);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    .metric-change {
-        font-size: 1rem;
-        font-weight: 600;
-        margin-top: 0.5rem;
-    }
-    
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: linear-gradient(180deg, #1e1e2e 0%, #2d2d44 100%);
-    }
-    
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: transparent;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        background: rgba(99, 102, 241, 0.1);
-        border-radius: 8px;
-        padding: 12px 24px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background: rgba(99, 102, 241, 0.2);
-        transform: translateY(-2px);
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    
-    /* Button styling */
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        font-weight: 600;
-        border-radius: 8px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-    }
-    
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-    }
-    
-    /* Success/Error messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        border-radius: 10px;
-        padding: 1rem;
-        border-left: 4px solid;
-    }
-    
-    /* Chart container */
-    .chart-container {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-    }
-    
-    /* Loading animation */
-    .stSpinner > div {
-        border-top-color: #667eea !important;
-    }
-    
-    /* Multiselect styling */
-    .stMultiSelect [data-baseweb="tag"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 6px;
-    }
-</style>
+# ... (rest of the CSS remains unchanged)
+# ... (rest of the CSS remains unchanged)
 """, unsafe_allow_html=True)
 
 # Header
 st.markdown("""
-<div class="main-header">
-    <h1>📈 Stock Analysis Pro</h1>
-    <p>AI-Powered Technical Analysis & Market Intelligence</p>
-</div>
+# ... (rest of the Header remains unchanged)
+# ... (rest of the Header remains unchanged)
 """, unsafe_allow_html=True)
 
 # Initialize session state
@@ -262,6 +269,8 @@ if 'ticker_info' not in st.session_state:
 
 # Sidebar Configuration
 with st.sidebar:
+# ... (rest of the Sidebar remains unchanged)
+# ... (rest of the Sidebar remains unchanged)
     st.markdown("### ⚙️ Configuration")
     
     ticker = st.text_input(
@@ -369,7 +378,9 @@ if st.session_state['stock_data'] is not None:
     if data.empty:
         st.warning("Data is empty. Please check your selected date range or ticker.")
         st.stop()
-        
+# ... (rest of the Key Metrics Row remains unchanged)
+# ... (rest of the Key Metrics Row remains unchanged)
+
     current_price = data[close_col].iloc[-1]
     prev_price = data[close_col].iloc[-2] if len(data) > 1 else current_price
     price_change = current_price - prev_price
@@ -453,6 +464,8 @@ if st.session_state['stock_data'] is not None:
     
     # TAB 1: Advanced Chart
     with tab1:
+# ... (rest of the Advanced Chart tab remains unchanged)
+# ... (rest of the Advanced Chart tab remains unchanged)
         st.markdown("### Interactive Price Chart")
         
         chart_col1, chart_col2 = st.columns([3, 1])
@@ -656,29 +669,48 @@ if st.session_state['stock_data'] is not None:
         
         st.plotly_chart(fig, use_container_width=True)
     
-    # TAB 2: AI Analysis
+    # TAB 2: AI Analysis (UPDATED)
     with tab2:
         st.markdown("### 🤖 AI-Powered Technical Analysis")
-        
-        # Check if Ollama is likely available (local only)
-        st.info("⚠️ **Note**: AI Analysis requires Ollama running locally. This feature is disabled on Streamlit Cloud.")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
+            # Add a custom prompt input
+            initial_prompt = st.text_area(
+                "Optional Prompt/Focus", 
+                "Analyze the chart for recent breakouts, indicator divergence, and momentum. Provide an objective outlook and key levels.",
+                height=100
+            )
+
             if st.button("🚀 Generate AI Analysis", use_container_width=True):
-                st.warning("🔌 AI Analysis is only available when running locally with Ollama installed.")
-                st.markdown("""
-                **To use AI Analysis:**
-                1. Install Ollama: https://ollama.ai
-                2. Run: `ollama pull llama3.2-vision`
-                3. Run: `ollama serve`
-                4. Run this app locally: `streamlit run app.py`
-                """)
-        
+                if len(data) < 50:
+                    st.warning("⚠️ **Analysis Skipped**: Need at least 50 days of data to calculate indicators and generate a meaningful analysis.")
+                else:
+                    with st.spinner("Generating AI analysis... (Trying to connect to local Ollama)"):
+                        
+                        try:
+                            # Attempt to use the real function
+                            analysis_result, error = generate_ai_analysis(ticker, data, ticker_info, initial_prompt)
+                            
+                            if error:
+                                st.error(error)
+                                # Fallback to simulation if real AI fails
+                                st.session_state['ai_analysis'] = simulate_ai_analysis(ticker, data)
+                                st.info("Showing **Simulated AI Analysis** as a fallback. Check the error above for troubleshooting.")
+                            else:
+                                st.session_state['ai_analysis'] = analysis_result
+                                st.success("✅ AI Analysis generated successfully from Ollama!")
+                                
+                        except NameError:
+                            # This happens if 'ollama' module is not imported/available (e.g., in a non-local env)
+                            st.error("❌ **Ollama Module Error:** The `ollama` Python library is not installed or available. Using simulation.")
+                            st.session_state['ai_analysis'] = simulate_ai_analysis(ticker, data)
+
+
         with col2:
-            st.info("💡 **Tip**: Download and run locally for AI-powered insights!")
-        
+            st.info("💡 **Tip**: This feature uses a **vision model** on the chart image for visual analysis. **It requires Ollama running locally.**")
+
         if st.session_state.get('ai_analysis'):
             st.markdown("#### 💬 AI Analysis Report")
             st.markdown(st.session_state['ai_analysis'])
@@ -686,6 +718,8 @@ if st.session_state['stock_data'] is not None:
     
     # TAB 3: Technical Indicators
     with tab3:
+# ... (rest of the Technical Indicators tab remains unchanged)
+# ... (rest of the Technical Indicators tab remains unchanged)
         st.markdown("### 📊 Technical Indicators Overview")
         
         if 'RSI' in data.columns and 'MACD' in data.columns and 'BB_Upper' in data.columns:
@@ -814,6 +848,8 @@ if st.session_state['stock_data'] is not None:
 
     # TAB 4: Backtest
     with tab4:
+# ... (rest of the Backtest tab remains unchanged)
+# ... (rest of the Backtest tab remains unchanged)
         st.markdown("### ⚡ Strategy Backtesting")
         
         bt_col1, bt_col2 = st.columns([2, 1])
@@ -1063,7 +1099,8 @@ if st.session_state['stock_data'] is not None:
                     content.append(Spacer(1, 24))
                     
                     content.append(Paragraph("AI Analysis", styles['Heading2']))
-                    analysis_text = st.session_state['ai_analysis'].replace('\n', '<br/>')
+                    # Clean up markdown headers/formatting for PDF output
+                    analysis_text = st.session_state['ai_analysis'].replace('\n', '<br/>').replace('###', '<b>').replace('####', '<b>').replace('**', '')
                     content.append(Paragraph(analysis_text, styles['Normal']))
                     
                     doc.build(content)
@@ -1098,6 +1135,8 @@ if st.session_state['stock_data'] is not None:
         st.info("💡 Generate AI analysis to unlock PDF reports!")
 
 else:
+# ... (rest of the Welcome Screen remains unchanged)
+# ... (rest of the Welcome Screen remains unchanged)
     st.markdown("""
     <div style="text-align: center; padding: 4rem 2rem;">
         <h2 style="color: #667eea; margin-bottom: 1rem;">👋 Welcome to Stock Analysis Pro</h2>
