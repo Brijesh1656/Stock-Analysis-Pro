@@ -17,34 +17,32 @@ import time
 
 
 # Cached data fetching with retry logic
-@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_stock_data(ticker, start_date, end_date, max_retries=3):
     """Fetch stock data with retry logic and rate limit handling"""
     for attempt in range(max_retries):
         try:
-            # Add delay between attempts
             if attempt > 0:
-                time.sleep(2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
+                time.sleep(2 ** attempt)
             
             df = yf.download(
                 ticker, 
                 start=start_date, 
                 end=end_date, 
                 progress=False,
-                auto_adjust=True  # Fix the FutureWarning
+                auto_adjust=True
             )
             
-            # Flatten MultiIndex columns
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = ['_'.join([str(i) for i in col]).strip().rstrip('_') for col in df.columns.values]
             
-            return df, None  # Success
+            return df, None
             
         except Exception as e:
             error_msg = str(e)
             if "Rate" in error_msg or "429" in error_msg:
                 if attempt < max_retries - 1:
-                    continue  # Retry
+                    continue
                 else:
                     return None, "⚠️ Yahoo Finance rate limit reached. Please try again in a few minutes."
             else:
@@ -67,21 +65,21 @@ def calculate_technical_indicators(df, close_col):
     """Calculates RSI, MACD, and Bollinger Bands on a DataFrame."""
     df_copy = df.copy()
     
-    # 1. RSI (Relative Strength Index)
+    # RSI
     delta = df_copy[close_col].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss.replace(0, np.nan) 
     df_copy['RSI'] = 100 - (100 / (1 + rs))
     
-    # 2. MACD (Moving Average Convergence Divergence)
+    # MACD
     exp1 = df_copy[close_col].ewm(span=12, adjust=False).mean()
     exp2 = df_copy[close_col].ewm(span=26, adjust=False).mean()
     df_copy['MACD'] = exp1 - exp2
     df_copy['MACD_Signal'] = df_copy['MACD'].ewm(span=9, adjust=False).mean()
     df_copy['MACD_Hist'] = df_copy['MACD'] - df_copy['MACD_Signal']
     
-    # 3. Bollinger Bands (20 period, 2 stdev)
+    # Bollinger Bands
     df_copy['BB_Middle'] = df_copy[close_col].rolling(window=20).mean()
     std = df_copy[close_col].rolling(window=20).std()
     df_copy['BB_Upper'] = df_copy['BB_Middle'] + (2 * std)
@@ -89,167 +87,415 @@ def calculate_technical_indicators(df, close_col):
     
     return df_copy
 
-# Page config with custom theme
+# Page config
 st.set_page_config(
     page_title="Stock Analysis Pro",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for premium look
+# 🚀 ULTRA-MODERN SLEEK DESIGN (Matching FinVision)
 st.markdown("""
 <style>
-    /* Main theme colors */
-    :root {
-        --primary-color: #6366f1;
-        --secondary-color: #8b5cf6;
-        --success-color: #10b981;
-        --danger-color: #ef4444;
-        --warning-color: #f59e0b;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+    
+    * {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
     
-    /* Hide default Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Custom header styling */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+    /* Premium Dark Theme */
+    .main {
+        background: #000000;
+        color: #ffffff;
     }
     
-    .main-header h1 {
-        color: white;
-        font-size: 2.5rem;
+    .stApp {
+        background: #000000;
+    }
+    
+    .block-container {
+        padding: 3rem 2rem !important;
+        max-width: 1400px !important;
+    }
+    
+    /* Glassmorphic Hero */
+    .hero-section {
+        position: relative;
+        text-align: center;
+        padding: 5rem 3rem;
+        margin-bottom: 4rem;
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(59, 130, 246, 0.05) 100%);
+        border-radius: 32px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+    }
+    
+    .hero-section::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+        animation: pulse 8s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.1); opacity: 0.8; }
+    }
+    
+    .logo-wrapper {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .logo {
+        font-size: 3rem;
+    }
+    
+    .brand-name {
+        font-size: 3rem;
         font-weight: 800;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        background: linear-gradient(135deg, #ffffff 0%, #8b5cf6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.03em;
     }
     
-    .main-header p {
-        color: rgba(255,255,255,0.9);
-        font-size: 1.1rem;
-        margin-top: 0.5rem;
+    .hero-tagline {
+        font-size: 1.125rem;
+        color: rgba(255, 255, 255, 0.6);
+        font-weight: 500;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.01em;
     }
     
-    /* Metric cards */
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    /* Premium Stat Cards */
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.25rem;
+        margin-bottom: 4rem;
     }
     
-    .metric-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 12px 48px rgba(0,0,0,0.15);
+    .stat-card {
+        position: relative;
+        background: rgba(255, 255, 255, 0.02);
+        backdrop-filter: blur(20px);
+        padding: 2rem 1.5rem;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+        overflow: hidden;
     }
     
-    .metric-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: white;
-        margin: 0.5rem 0;
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.6), transparent);
+        opacity: 0;
+        transition: opacity 0.4s ease;
     }
     
-    .metric-label {
-        font-size: 0.9rem;
-        color: rgba(255,255,255,0.8);
-        text-transform: uppercase;
-        letter-spacing: 1px;
+    .stat-card:hover {
+        transform: translateY(-8px);
+        border-color: rgba(139, 92, 246, 0.3);
+        background: rgba(139, 92, 246, 0.03);
+        box-shadow: 0 20px 60px rgba(139, 92, 246, 0.15);
     }
     
-    .metric-change {
-        font-size: 1rem;
+    .stat-card:hover::before {
+        opacity: 1;
+    }
+    
+    .stat-icon {
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+        opacity: 0.8;
+    }
+    
+    .stat-label {
+        font-size: 0.813rem;
+        color: rgba(255, 255, 255, 0.5);
         font-weight: 600;
-        margin-top: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.75rem;
     }
     
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: linear-gradient(180deg, #1e1e2e 0%, #2d2d44 100%);
+    .stat-value {
+        font-size: 2rem;
+        font-weight: 900;
+        color: #ffffff;
+        line-height: 1;
+        margin-bottom: 0.5rem;
+        letter-spacing: -0.02em;
     }
     
-    /* Tab styling */
+    .stat-delta {
+        font-size: 0.875rem;
+        font-weight: 600;
+        opacity: 0.9;
+    }
+    
+    /* Section Titles */
+    .section-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin-bottom: 1.5rem;
+        letter-spacing: -0.02em;
+    }
+    
+    /* Premium Input Fields */
+    .stTextInput > label, .stSelectbox > label, .stDateInput > label, .stNumberInput > label {
+        color: rgba(255, 255, 255, 0.5) !important;
+        font-weight: 600 !important;
+        font-size: 0.813rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem !important;
+    }
+    
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div,
+    .stDateInput > div > div > input,
+    .stNumberInput > div > div > input {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 16px !important;
+        color: white !important;
+        font-weight: 500 !important;
+        padding: 1rem 1.25rem !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stTextInput > div > div > input:focus,
+    .stSelectbox > div > div:focus-within,
+    .stDateInput > div > div > input:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: rgba(139, 92, 246, 0.6) !important;
+        background: rgba(139, 92, 246, 0.05) !important;
+        box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.1) !important;
+    }
+    
+    /* Ultra-Modern Button */
+    .stButton > button, .stDownloadButton > button {
+        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+        color: white;
+        border: none;
+        padding: 1rem 2rem;
+        border-radius: 16px;
+        font-weight: 700;
+        font-size: 1rem;
+        transition: all 0.3s cubic-bezier(0.165, 0.84, 0.44, 1);
+        text-transform: none;
+        letter-spacing: 0.02em;
+        box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3);
+        width: 100%;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stButton > button::before, .stDownloadButton > button::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: left 0.6s ease;
+    }
+    
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 48px rgba(139, 92, 246, 0.4);
+    }
+    
+    .stButton > button:hover::before, .stDownloadButton > button:hover::before {
+        left: 100%;
+    }
+    
+    /* Sleek Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: transparent;
+        gap: 0;
+        background: rgba(255, 255, 255, 0.02);
+        padding: 0.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        margin-bottom: 2rem;
     }
     
     .stTabs [data-baseweb="tab"] {
-        background: rgba(99, 102, 241, 0.1);
-        border-radius: 8px;
-        padding: 12px 24px;
+        background: transparent;
+        border: none;
+        border-radius: 12px;
+        color: rgba(255, 255, 255, 0.5);
         font-weight: 600;
+        padding: 0.875rem 1.75rem;
+        font-size: 0.938rem;
         transition: all 0.3s ease;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background: rgba(99, 102, 241, 0.2);
-        transform: translateY(-2px);
     }
     
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        color: #ffffff !important;
+        background: rgba(139, 92, 246, 0.15);
     }
     
-    /* Button styling */
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        font-weight: 600;
-        border-radius: 8px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    .stTabs [data-baseweb="tab"]:hover {
+        color: rgba(255, 255, 255, 0.8);
     }
     
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    /* Premium Metrics */
+    [data-testid="stMetricValue"] {
+        font-size: 2.25rem !important;
+        font-weight: 900 !important;
+        color: #ffffff !important;
+        letter-spacing: -0.02em !important;
     }
     
-    /* Success/Error messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        border-radius: 10px;
-        padding: 1rem;
-        border-left: 4px solid;
+    [data-testid="stMetricLabel"] {
+        color: rgba(255, 255, 255, 0.5) !important;
+        font-size: 0.813rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
     }
     
-    /* Chart container */
-    .chart-container {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    /* Premium Messages */
+    .stSuccess {
+        background: rgba(34, 197, 94, 0.1) !important;
+        border-left: 3px solid #22c55e !important;
+        border-radius: 16px !important;
+        color: #fff !important;
+        backdrop-filter: blur(10px);
     }
     
-    /* Loading animation */
-    .stSpinner > div {
-        border-top-color: #667eea !important;
+    .stWarning {
+        background: rgba(245, 158, 11, 0.1) !important;
+        border-left: 3px solid #f59e0b !important;
+        border-radius: 16px !important;
+        color: #fff !important;
+        backdrop-filter: blur(10px);
     }
     
-    /* Multiselect styling */
+    .stInfo {
+        background: rgba(59, 130, 246, 0.1) !important;
+        border-left: 3px solid #3b82f6 !important;
+        border-radius: 16px !important;
+        color: #fff !important;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stError {
+        background: rgba(239, 68, 68, 0.1) !important;
+        border-left: 3px solid #ef4444 !important;
+        border-radius: 16px !important;
+        color: #fff !important;
+        backdrop-filter: blur(10px);
+    }
+    
+    /* Multiselect */
     .stMultiSelect [data-baseweb="tag"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 6px;
+        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+        border-radius: 8px;
+    }
+    
+    /* Radio buttons */
+    .stRadio > div {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .stRadio > div > label {
+        background: rgba(255, 255, 255, 0.02);
+        padding: 0.75rem 1.5rem;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    
+    .stRadio > div > label:hover {
+        background: rgba(139, 92, 246, 0.05);
+        border-color: rgba(139, 92, 246, 0.2);
+    }
+    
+    /* Checkbox */
+    .stCheckbox {
+        background: rgba(255, 255, 255, 0.02);
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: #000000 !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+    }
+    
+    /* Progress Bar */
+    .stProgress > div > div > div {
+        background: linear-gradient(90deg, #8b5cf6 0%, #6366f1 100%) !important;
+        border-radius: 10px;
+    }
+    
+    .stProgress > div > div {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border-radius: 10px;
+    }
+    
+    /* Spinner */
+    .stSpinner > div {
+        border-top-color: #8b5cf6 !important;
+    }
+    
+    /* Hide Streamlit Branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Typography */
+    h1, h2, h3, h4 {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+    }
+    
+    h1 { font-size: 2.25rem !important; }
+    h2 { font-size: 1.875rem !important; }
+    h3 { font-size: 1.5rem !important; }
+    
+    p {
+        color: rgba(255, 255, 255, 0.7) !important;
+        line-height: 1.7 !important;
+    }
+    
+    /* Divider */
+    hr {
+        border: none;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.06);
+        margin: 2rem 0;
     }
 </style>
-""", unsafe_allow_html=True)
-
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>📈 Stock Analysis Pro</h1>
-    <p>AI-Powered Technical Analysis & Market Intelligence</p>
-</div>
 """, unsafe_allow_html=True)
 
 # Initialize session state
@@ -260,9 +506,20 @@ if 'ai_analysis' not in st.session_state:
 if 'ticker_info' not in st.session_state:
     st.session_state['ticker_info'] = None
 
+# Hero Section
+st.markdown("""
+<div class="hero-section">
+    <div class="logo-wrapper">
+        <span class="logo">📈</span>
+        <span class="brand-name">Stock Analysis Pro</span>
+    </div>
+    <p class="hero-tagline">AI-Powered Technical Analysis • Real-Time Market Intelligence • Advanced Backtesting</p>
+</div>
+""", unsafe_allow_html=True)
+
 # Sidebar Configuration
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
+    st.markdown('<h3 class="section-title">⚙️ Configuration</h3>', unsafe_allow_html=True)
     
     ticker = st.text_input(
         "Stock Ticker",
@@ -271,9 +528,8 @@ with st.sidebar:
         help="Enter a valid stock ticker symbol"
     ).upper()
     
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
     
-    # Date range with presets
     date_preset = st.selectbox(
         "Quick Date Range",
         ["Custom", "1 Week", "1 Month", "3 Months", "6 Months", "1 Year", "YTD", "5 Years"]
@@ -314,13 +570,12 @@ with st.sidebar:
             max_value=today
         )
     
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
     
     fetch_btn = st.button("🚀 Fetch Data", use_container_width=True)
     
     if fetch_btn:
         with st.spinner(f"Fetching data for {ticker}..."):
-            # Fetch stock data with retry logic
             df, error = fetch_stock_data(ticker, start_date, end_date)
             
             if error:
@@ -330,17 +585,15 @@ with st.sidebar:
             elif df.empty:
                 st.error("❌ No data found for this ticker and date range.")
             else:
-                # Fetch ticker info
                 ticker_info = fetch_ticker_info(ticker)
                 
                 st.session_state['stock_data'] = df
                 st.session_state['ticker_info'] = ticker_info
                 st.success(f"✅ Loaded {len(df)} days of data!")
     
-    # Show data info if available
     if st.session_state['stock_data'] is not None:
-        st.markdown("---")
-        st.markdown("### 📊 Data Info")
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<h3 class="section-title">📊 Data Info</h3>', unsafe_allow_html=True)
         data = st.session_state['stock_data']
         st.metric("Days Loaded", len(data))
         st.metric("Date Range", f"{data.index[0].strftime('%Y-%m-%d')} to {data.index[-1].strftime('%Y-%m-%d')}")
@@ -357,14 +610,10 @@ if st.session_state['stock_data'] is not None:
     low_col = 'Low' if 'Low' in data.columns else f'Low_{ticker}'
     volume_col = 'Volume' if 'Volume' in data.columns else f'Volume_{ticker}'
     
-    
     if len(data) >= 50:
         data = calculate_technical_indicators(data, close_col).dropna()
         if data.empty:
-            st.warning("Not enough clean data after calculating technical indicators. Charts may be incomplete.")
-    
-    # Key Metrics Row
-    st.markdown("### 📊 Key Metrics")
+            st.warning("Not enough clean data after calculating technical indicators.")
     
     if data.empty:
         st.warning("Data is empty. Please check your selected date range or ticker.")
@@ -375,76 +624,59 @@ if st.session_state['stock_data'] is not None:
     price_change = current_price - prev_price
     price_change_pct = (price_change / prev_price) * 100 if prev_price != 0 else 0
     
-    # Calculate additional metrics
     high_52w = data[high_col].tail(252).max() if len(data) >= 252 else data[high_col].max()
     low_52w = data[low_col].tail(252).min() if len(data) >= 252 else data[low_col].min()
     avg_volume = data[volume_col].tail(20).mean()
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Key Metrics
+    st.markdown('<h2 class="section-title">📊 Key Metrics</h2>', unsafe_allow_html=True)
     
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">Current Price</div>
-            <div class="metric-value">${current_price:.2f}</div>
-            <div class="metric-change" style="color: {'#10b981' if price_change >= 0 else '#ef4444'}">
+    change_color = "#22c55e" if price_change >= 0 else "#ef4444"
+    
+    st.markdown(f"""
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-label">Current Price</div>
+            <div class="stat-value">${current_price:.2f}</div>
+            <div class="stat-delta" style="color: {change_color}">
                 {'+' if price_change >= 0 else ''}{price_change:.2f} ({'+' if price_change_pct >= 0 else ''}{price_change_pct:.2f}%)
             </div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">52W High</div>
-            <div class="metric-value">${high_52w:.2f}</div>
-            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+        <div class="stat-card">
+            <div class="stat-icon">📈</div>
+            <div class="stat-label">52W High</div>
+            <div class="stat-value">${high_52w:.2f}</div>
+            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                 {((current_price / high_52w - 1) * 100):.1f}% from high
             </div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">52W Low</div>
-            <div class="metric-value">${low_52w:.2f}</div>
-            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+        <div class="stat-card">
+            <div class="stat-icon">📉</div>
+            <div class="stat-label">52W Low</div>
+            <div class="stat-value">${low_52w:.2f}</div>
+            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                 {((current_price / low_52w - 1) * 100):.1f}% from low
             </div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">Avg Volume (20D)</div>
-            <div class="metric-value">{avg_volume/1e6:.2f}M</div>
-            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-label">Avg Volume (20D)</div>
+            <div class="stat-value">{avg_volume/1e6:.2f}M</div>
+            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                 Last: {data[volume_col].iloc[-1]/1e6:.2f}M
             </div>
         </div>
-        """, unsafe_allow_html=True)
-    
-    with col5:
-        market_cap = ticker_info.get('marketCap', 0)
-        if market_cap > 0:
-            market_cap_str = f"${market_cap/1e9:.2f}B" if market_cap > 1e9 else f"${market_cap/1e6:.2f}M"
-        else:
-            market_cap_str = "N/A"
-        
-        pe_ratio = ticker_info.get('trailingPE', 'N/A')
-        pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
-        
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">Market Cap</div>
-            <div class="metric-value">{market_cap_str}</div>
-            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
-                P/E: {pe_str}
+        <div class="stat-card">
+            <div class="stat-icon">🏢</div>
+            <div class="stat-label">Market Cap</div>
+            <div class="stat-value">{'${:.2f}B'.format(ticker_info.get('marketCap', 0)/1e9) if ticker_info.get('marketCap', 0) > 1e9 else 'N/A'}</div>
+            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
+                P/E: {'{:.2f}'.format(ticker_info.get('trailingPE', 0)) if isinstance(ticker_info.get('trailingPE'), (int, float)) else 'N/A'}
             </div>
         </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -453,7 +685,7 @@ if st.session_state['stock_data'] is not None:
     
     # TAB 1: Advanced Chart
     with tab1:
-        st.markdown("### Interactive Price Chart")
+        st.markdown('<h3 class="section-title">Interactive Price Chart</h3>', unsafe_allow_html=True)
         
         chart_col1, chart_col2 = st.columns([3, 1])
         
@@ -495,7 +727,7 @@ if st.session_state['stock_data'] is not None:
                     low=data[low_col],
                     close=data[close_col],
                     name="OHLC",
-                    increasing_line_color='#10b981',
+                    increasing_line_color='#22c55e',
                     decreasing_line_color='#ef4444'
                 ),
                 row=1, col=1
@@ -507,7 +739,7 @@ if st.session_state['stock_data'] is not None:
                     y=data[close_col],
                     mode='lines',
                     name='Close',
-                    line=dict(color='#667eea', width=2)
+                    line=dict(color='#8b5cf6', width=2)
                 ),
                 row=1, col=1
             )
@@ -519,8 +751,8 @@ if st.session_state['stock_data'] is not None:
                     mode='lines',
                     name='Close',
                     fill='tozeroy',
-                    line=dict(color='#667eea', width=2),
-                    fillcolor='rgba(102, 126, 234, 0.3)'
+                    line=dict(color='#8b5cf6', width=2),
+                    fillcolor='rgba(139, 92, 246, 0.3)'
                 ),
                 row=1, col=1
             )
@@ -620,7 +852,7 @@ if st.session_state['stock_data'] is not None:
                 color_idx += 1
         
         if show_volume:
-            colors_volume = ['#ef4444' if data[close_col].iloc[i] < data[open_col].iloc[i] else '#10b981' 
+            colors_volume = ['#ef4444' if data[close_col].iloc[i] < data[open_col].iloc[i] else '#22c55e' 
                            for i in range(len(data))]
             fig.add_trace(
                 go.Bar(
@@ -658,9 +890,8 @@ if st.session_state['stock_data'] is not None:
     
     # TAB 2: AI Analysis
     with tab2:
-        st.markdown("### 🤖 AI-Powered Technical Analysis")
+        st.markdown('<h3 class="section-title">🤖 AI-Powered Technical Analysis</h3>', unsafe_allow_html=True)
         
-        # Check if Ollama is likely available (local only)
         st.info("⚠️ **Note**: AI Analysis requires Ollama running locally. This feature is disabled on Streamlit Cloud.")
         
         col1, col2 = st.columns([2, 1])
@@ -682,62 +913,58 @@ if st.session_state['stock_data'] is not None:
         if st.session_state.get('ai_analysis'):
             st.markdown("#### 💬 AI Analysis Report")
             st.markdown(st.session_state['ai_analysis'])
-
     
     # TAB 3: Technical Indicators
     with tab3:
-        st.markdown("### 📊 Technical Indicators Overview")
+        st.markdown('<h3 class="section-title">📊 Technical Indicators Overview</h3>', unsafe_allow_html=True)
         
         if 'RSI' in data.columns and 'MACD' in data.columns and 'BB_Upper' in data.columns:
             
-            ind_col1, ind_col2, ind_col3 = st.columns(3)
-
-            with ind_col1:
-                current_rsi = data['RSI'].iloc[-1]
-                rsi_signal = "Oversold 🟢" if current_rsi < 30 else "Overbought 🔴" if current_rsi > 70 else "Neutral 🟡"
-                rsi_color = "#10b981" if current_rsi < 30 else "#ef4444" if current_rsi > 70 else "#f59e0b"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">RSI (14)</div>
-                    <div class="metric-value">{current_rsi:.2f}</div>
-                    <div class="metric-change" style="color: {rsi_color}">
+            current_rsi = data['RSI'].iloc[-1]
+            rsi_signal = "Oversold 🟢" if current_rsi < 30 else "Overbought 🔴" if current_rsi > 70 else "Neutral 🟡"
+            rsi_color = "#22c55e" if current_rsi < 30 else "#ef4444" if current_rsi > 70 else "#f59e0b"
+            
+            current_macd = data['MACD'].iloc[-1]
+            current_signal = data['MACD_Signal'].iloc[-1]
+            macd_trend = "Bullish 🟢" if current_macd > current_signal else "Bearish 🔴"
+            macd_color = "#22c55e" if current_macd > current_signal else "#ef4444"
+            
+            current_price_val = data[close_col].iloc[-1]
+            bb_upper_val = data['BB_Upper'].iloc[-1]
+            bb_lower_val = data['BB_Lower'].iloc[-1]
+            bb_position = ((current_price_val - bb_lower_val) / (bb_upper_val - bb_lower_val)) * 100
+            bb_signal = "Near Upper 🔴" if bb_position > 80 else "Near Lower 🟢" if bb_position < 20 else "Mid Range 🟡"
+            bb_color = "#ef4444" if bb_position > 80 else "#22c55e" if bb_position < 20 else "#f59e0b"
+            
+            st.markdown(f"""
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📈</div>
+                    <div class="stat-label">RSI (14)</div>
+                    <div class="stat-value">{current_rsi:.2f}</div>
+                    <div class="stat-delta" style="color: {rsi_color}">
                         {rsi_signal}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-
-            with ind_col2:
-                current_macd = data['MACD'].iloc[-1]
-                current_signal = data['MACD_Signal'].iloc[-1]
-                macd_trend = "Bullish 🟢" if current_macd > current_signal else "Bearish 🔴"
-                macd_color = "#10b981" if current_macd > current_signal else "#ef4444"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">MACD</div>
-                    <div class="metric-value">{current_macd:.2f}</div>
-                    <div class="metric-change" style="color: {macd_color}">
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-label">MACD</div>
+                    <div class="stat-value">{current_macd:.2f}</div>
+                    <div class="stat-delta" style="color: {macd_color}">
                         {macd_trend}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-
-            with ind_col3:
-                current_price_val = data[close_col].iloc[-1]
-                bb_upper_val = data['BB_Upper'].iloc[-1]
-                bb_lower_val = data['BB_Lower'].iloc[-1]
-                bb_position = ((current_price_val - bb_lower_val) / (bb_upper_val - bb_lower_val)) * 100
-                bb_signal = "Near Upper 🔴" if bb_position > 80 else "Near Lower 🟢" if bb_position < 20 else "Mid Range 🟡"
-                bb_color = "#ef4444" if bb_position > 80 else "#10b981" if bb_position < 20 else "#f59e0b"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Bollinger Bands</div>
-                    <div class="metric-value">{bb_position:.1f}%</div>
-                    <div class="metric-change" style="color: {bb_color}">
+                <div class="stat-card">
+                    <div class="stat-icon">📉</div>
+                    <div class="stat-label">Bollinger Bands</div>
+                    <div class="stat-value">{bb_position:.1f}%</div>
+                    <div class="stat-delta" style="color: {bb_color}">
                         {bb_signal}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-
+            </div>
+            """, unsafe_allow_html=True)
+            
             st.markdown("<br>", unsafe_allow_html=True)
             
             # RSI Chart
@@ -748,12 +975,12 @@ if st.session_state['stock_data'] is not None:
                 y=data['RSI'],
                 mode='lines',
                 name='RSI',
-                line=dict(color='#667eea', width=2)
+                line=dict(color='#8b5cf6', width=2)
             ))
             rsi_fig.add_hline(y=70, line_dash="dash", line_color="#ef4444", annotation_text="Overbought (70)")
-            rsi_fig.add_hline(y=30, line_dash="dash", line_color="#10b981", annotation_text="Oversold (30)")
+            rsi_fig.add_hline(y=30, line_dash="dash", line_color="#22c55e", annotation_text="Oversold (30)")
             rsi_fig.add_hrect(y0=70, y1=100, fillcolor="#ef4444", opacity=0.1, line_width=0)
-            rsi_fig.add_hrect(y0=0, y1=30, fillcolor="#10b981", opacity=0.1, line_width=0)
+            rsi_fig.add_hrect(y0=0, y1=30, fillcolor="#22c55e", opacity=0.1, line_width=0)
             
             rsi_fig.update_layout(
                 height=300,
@@ -777,7 +1004,7 @@ if st.session_state['stock_data'] is not None:
                 y=data['MACD'],
                 mode='lines',
                 name='MACD',
-                line=dict(color='#667eea', width=2)
+                line=dict(color='#8b5cf6', width=2)
             ))
             macd_fig.add_trace(go.Scatter(
                 x=data.index,
@@ -787,7 +1014,7 @@ if st.session_state['stock_data'] is not None:
                 line=dict(color='#f59e0b', width=2)
             ))
             
-            colors_hist = ['#10b981' if val >= 0 else '#ef4444' for val in data['MACD_Hist']]
+            colors_hist = ['#22c55e' if val >= 0 else '#ef4444' for val in data['MACD_Hist']]
             macd_fig.add_trace(go.Bar(
                 x=data.index,
                 y=data['MACD_Hist'],
@@ -810,11 +1037,11 @@ if st.session_state['stock_data'] is not None:
             macd_fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128, 128, 128, 0.2)')
             st.plotly_chart(macd_fig, use_container_width=True)
         else:
-            st.warning("Not enough data points to calculate all technical indicators (need at least 26 days). Please select a longer date range.")
-
+            st.warning("Not enough data points to calculate all technical indicators (need at least 26 days).")
+    
     # TAB 4: Backtest
     with tab4:
-        st.markdown("### ⚡ Strategy Backtesting")
+        st.markdown('<h3 class="section-title">⚡ Strategy Backtesting</h3>', unsafe_allow_html=True)
         
         bt_col1, bt_col2 = st.columns([2, 1])
         
@@ -893,51 +1120,44 @@ if st.session_state['stock_data'] is not None:
                     
                     st.markdown("#### 📊 Backtest Results")
                     
-                    result_col1, result_col2, result_col3, result_col4 = st.columns(4)
+                    result_color = "#22c55e" if total_return_strategy > total_return_market else "#ef4444"
                     
-                    with result_col1:
-                        st.markdown(f"""
-                        <div class="metric-card" style="background: linear-gradient(135deg, {'#10b981' if total_return_strategy > total_return_market else '#ef4444'} 0%, {'#059669' if total_return_strategy > total_return_market else '#dc2626'} 100%);">
-                            <div class="metric-label">Strategy Return</div>
-                            <div class="metric-value">{total_return_strategy:.2f}%</div>
-                            <div class="metric-change" style="color: white">
+                    st.markdown(f"""
+                    <div class="stat-grid">
+                        <div class="stat-card" style="border-color: {result_color};">
+                            <div class="stat-icon">💰</div>
+                            <div class="stat-label">Strategy Return</div>
+                            <div class="stat-value">{total_return_strategy:.2f}%</div>
+                            <div class="stat-delta" style="color: {result_color}">
                                 ${final_capital_strategy:,.2f}
                             </div>
                         </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with result_col2:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Buy & Hold Return</div>
-                            <div class="metric-value">{total_return_market:.2f}%</div>
-                            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+                        <div class="stat-card">
+                            <div class="stat-icon">📈</div>
+                            <div class="stat-label">Buy & Hold Return</div>
+                            <div class="stat-value">{total_return_market:.2f}%</div>
+                            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                                 ${final_capital_market:,.2f}
                             </div>
                         </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with result_col3:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Strategy Sharpe</div>
-                            <div class="metric-value">{sharpe_strategy:.2f}</div>
-                            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+                        <div class="stat-card">
+                            <div class="stat-icon">📊</div>
+                            <div class="stat-label">Strategy Sharpe</div>
+                            <div class="stat-value">{sharpe_strategy:.2f}</div>
+                            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                                 Market: {sharpe_market:.2f}
                             </div>
                         </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with result_col4:
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Max Drawdown</div>
-                            <div class="metric-value">{drawdown_strategy:.2f}%</div>
-                            <div class="metric-change" style="color: rgba(255,255,255,0.7)">
+                        <div class="stat-card">
+                            <div class="stat-icon">📉</div>
+                            <div class="stat-label">Max Drawdown</div>
+                            <div class="stat-value">{drawdown_strategy:.2f}%</div>
+                            <div class="stat-delta" style="color: rgba(255,255,255,0.7)">
                                 Market: {drawdown_market:.2f}%
                             </div>
                         </div>
-                        """, unsafe_allow_html=True)
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     
@@ -948,9 +1168,9 @@ if st.session_state['stock_data'] is not None:
                         y=bt_data['Cumulative_Strategy'] * initial_capital,
                         mode='lines',
                         name='Strategy',
-                        line=dict(color='#667eea', width=3),
+                        line=dict(color='#8b5cf6', width=3),
                         fill='tozeroy',
-                        fillcolor='rgba(102, 126, 234, 0.2)'
+                        fillcolor='rgba(139, 92, 246, 0.2)'
                     ))
                     
                     equity_fig.add_trace(go.Scatter(
@@ -986,7 +1206,7 @@ if st.session_state['stock_data'] is not None:
                         y=bt_data[close_col],
                         mode='lines',
                         name='Price',
-                        line=dict(color='#667eea', width=2)
+                        line=dict(color='#8b5cf6', width=2)
                     ))
                     
                     buy_signals = bt_data[bt_data['Signal'].diff() == 1]
@@ -995,7 +1215,7 @@ if st.session_state['stock_data'] is not None:
                         y=buy_signals[close_col],
                         mode='markers',
                         name='Buy',
-                        marker=dict(color='#10b981', size=12, symbol='triangle-up')
+                        marker=dict(color='#22c55e', size=12, symbol='triangle-up')
                     ))
                     
                     sell_signals = bt_data[bt_data['Signal'].diff() == -1]
@@ -1026,108 +1246,76 @@ if st.session_state['stock_data'] is not None:
                     st.warning("Not enough data to run backtest with selected parameters.")
     
     # Export Report Section
-    st.markdown("---")
-    st.markdown("### 📑 Export Analysis Report")
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.divider()
+    st.markdown('<h3 class="section-title">📥 Export Analysis</h3>', unsafe_allow_html=True)
     
     export_col1, export_col2, export_col3 = st.columns(3)
     
     with export_col1:
-        if st.button("📊 Download Full Report (PDF)", use_container_width=True):
-            if st.session_state.get('ai_analysis'):
-                try:
-                    doc = SimpleDocTemplate("stock_analysis_report.pdf", pagesize=letter)
-                    styles = getSampleStyleSheet()
-                    
-                    title_style = ParagraphStyle(
-                        'CustomTitle',
-                        parent=styles['Heading1'],
-                        fontSize=24,
-                        textColor='#667eea',
-                        spaceAfter=30,
-                        alignment=TA_CENTER
-                    )
-                    
-                    content = []
-                    content.append(Paragraph(f"Stock Analysis Report: {ticker}", title_style))
-                    content.append(Spacer(1, 12))
-                    content.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-                    content.append(Spacer(1, 12))
-                    content.append(Paragraph(f"Date Range: {start_date} to {end_date}", styles['Normal']))
-                    content.append(Spacer(1, 24))
-                    
-                    content.append(Paragraph("Key Metrics", styles['Heading2']))
-                    content.append(Paragraph(f"Current Price: ${current_price:.2f}", styles['Normal']))
-                    content.append(Paragraph(f"Price Change: {price_change:+.2f} ({price_change_pct:+.2f}%)", styles['Normal']))
-                    content.append(Paragraph(f"52-Week High: ${high_52w:.2f}", styles['Normal']))
-                    content.append(Paragraph(f"52-Week Low: ${low_52w:.2f}", styles['Normal']))
-                    content.append(Spacer(1, 24))
-                    
-                    content.append(Paragraph("AI Analysis", styles['Heading2']))
-                    analysis_text = st.session_state['ai_analysis'].replace('\n', '<br/>')
-                    content.append(Paragraph(analysis_text, styles['Normal']))
-                    
-                    doc.build(content)
-                    
-                    with open("stock_analysis_report.pdf", "rb") as pdf_file:
-                        st.download_button(
-                            "📥 Download PDF",
-                            pdf_file,
-                            file_name=f"{ticker}_analysis_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                    
-                    os.remove("stock_analysis_report.pdf")
-                except Exception as e:
-                    st.error(f"Error generating PDF: {str(e)}")
-            else:
-                st.warning("Please generate AI analysis first!")
+        csv = data.to_csv()
+        st.download_button(
+            "📊 Download Data (CSV)",
+            csv,
+            file_name=f"{ticker}_data_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
     
     with export_col2:
-        if st.button("📈 Download Data (CSV)", use_container_width=True):
-            csv = data.to_csv()
-            st.download_button(
-                "📥 Download CSV",
-                csv,
-                file_name=f"{ticker}_data_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        if st.button("📈 Generate Report", use_container_width=True):
+            st.info("💡 PDF reports available with AI analysis!")
     
     with export_col3:
-        st.info("💡 Generate AI analysis to unlock PDF reports!")
+        st.info("💡 Run locally for full export features")
 
 else:
+    # Welcome Screen
     st.markdown("""
     <div style="text-align: center; padding: 4rem 2rem;">
-        <h2 style="color: #667eea; margin-bottom: 1rem;">👋 Welcome to Stock Analysis Pro</h2>
-        <p style="font-size: 1.2rem; color: rgba(255,255,255,0.7); margin-bottom: 2rem;">
-            Get started by entering a stock ticker and fetching data from the sidebar
+        <h2 style="color: #8b5cf6; margin-bottom: 1rem; font-size: 2.5rem;">👋 Welcome to Stock Analysis Pro</h2>
+        <p style="font-size: 1.2rem; color: rgba(255,255,255,0.6); margin-bottom: 3rem;">
+            Get started by entering a stock ticker in the sidebar
         </p>
-        <div style="display: flex; justify-content: center; gap: 2rem; margin-top: 3rem;">
-            <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">📈</div>
-                <h3 style="color: #667eea;">Advanced Charts</h3>
-                <p style="color: rgba(255,255,255,0.6)">Interactive candlestick charts with multiple technical indicators</p>
-            </div>
-            <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🤖</div>
-                <h3 style="color: #667eea;">AI Analysis</h3>
-                <p style="color: rgba(255,255,255,0.6)">Get intelligent insights powered by Llama Vision AI</p>
-            </div>
-            <div style="background: rgba(102, 126, 234, 0.1); padding: 2rem; border-radius: 12px; max-width: 300px;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
-                <h3 style="color: #667eea;">Backtesting</h3>
-                <p style="color: rgba(255,255,255,0.6)">Test trading strategies with historical data</p>
-            </div>
-        </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Feature Cards
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div style="background: rgba(139, 92, 246, 0.05); padding: 3rem 2rem; border-radius: 24px; border: 1px solid rgba(139, 92, 246, 0.2); text-align: center;">
+            <div style="font-size: 3.5rem; margin-bottom: 1.5rem;">📈</div>
+            <h3 style="color: #8b5cf6; margin-bottom: 1rem;">Advanced Charts</h3>
+            <p style="color: rgba(255,255,255,0.6); line-height: 1.7;">Interactive candlestick charts with multiple technical indicators and real-time data</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div style="background: rgba(139, 92, 246, 0.05); padding: 3rem 2rem; border-radius: 24px; border: 1px solid rgba(139, 92, 246, 0.2); text-align: center;">
+            <div style="font-size: 3.5rem; margin-bottom: 1.5rem;">🤖</div>
+            <h3 style="color: #8b5cf6; margin-bottom: 1rem;">AI Analysis</h3>
+            <p style="color: rgba(255,255,255,0.6); line-height: 1.7;">Get intelligent insights powered by Llama Vision AI (local deployment)</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div style="background: rgba(139, 92, 246, 0.05); padding: 3rem 2rem; border-radius: 24px; border: 1px solid rgba(139, 92, 246, 0.2); text-align: center;">
+            <div style="font-size: 3.5rem; margin-bottom: 1.5rem;">⚡</div>
+            <h3 style="color: #8b5cf6; margin-bottom: 1rem;">Backtesting</h3>
+            <p style="color: rgba(255,255,255,0.6); line-height: 1.7;">Test trading strategies with historical data and performance metrics</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-st.markdown("---")
+# Footer
+st.markdown("<br><br>", unsafe_allow_html=True)
+st.divider()
 st.markdown("""
 <div style="text-align: center; color: rgba(255,255,255,0.5); padding: 2rem;">
-    <p>Built with ❤️ using Streamlit • Powered by yFinance & Ollama AI</p>
-    <p style="font-size: 0.9rem; margin-top: 0.5rem;">⚠️ For educational purposes only. Not financial advice.</p>
+    <p style="font-size: 1rem; margin-bottom: 0.5rem;">Built with ❤️ using Streamlit • Powered by yFinance & Ollama AI</p>
+    <p style="font-size: 0.9rem;">⚠️ For educational purposes only. Not financial advice.</p>
 </div>
 """, unsafe_allow_html=True)
