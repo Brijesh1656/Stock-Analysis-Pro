@@ -6,6 +6,10 @@
 
 A comprehensive stock analysis application that combines real-time market data, advanced technical indicators, and AI-powered insights to help traders make informed decisions.
 
+## 🚀 Live Demo
+Check out the live app here 👉 [Stock Analysis Pro on Streamlit](https://stock-analysispro.streamlit.app/)
+
+
 ---
 
 ## ✨ Features
